@@ -1,0 +1,16 @@
+body { margin: 0; font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; background: #f6f7f9; color: #1c1f24; }
+main { max-width: 640px; margin: 0 auto; padding: 1rem; }
+h1 { font-size: 1.4rem; margin: 0.5rem 0; }
+#updated { color: #555; margin: 0 0 0.75rem; font-size: 0.9rem; }
+.status { background: #fdecea; color: #8a1c12; border: 1px solid #f5c2bc; padding: 0.5rem 0.75rem; border-radius: 6px; }
+table { width: 100%; border-collapse: collapse; background: #fff; border-radius: 8px; overflow: hidden; box-shadow: 0 1px 2px rgba(0,0,0,0.08); }
+th, td { padding: 0.6rem 0.75rem; text-align: left; border-bottom: 1px solid #eee; }
+th { font-size: 0.8rem; text-transform: uppercase; color: #666; background: #fafafa; }
+.price, .change { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.rank { color: #888; width: 2rem; }
+.symbol { color: #888; font-size: 0.85em; }
+.up { color: #0a7a33; }
+.down { color: #b3261e; }
+.source { font-size: 0.8rem; color: #666; }
+a { color: #1a5fb4; }
+@media (max-width: 420px) { th, td { padding: 0.5rem 0.4rem; } h1 { font-size: 1.15rem; } }

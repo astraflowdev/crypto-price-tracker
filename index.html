@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Crypto Price Tracker</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <main>
+    <h1>Top 10 coins by market cap</h1>
+    <p id="updated" aria-live="polite">Loading prices…</p>
+    <noscript><p class="status">This page needs JavaScript to load the prices.</p></noscript>
+    <p id="status" class="status" role="alert" hidden></p>
+    <table>
+      <thead>
+        <tr><th scope="col">#</th><th scope="col">Coin</th><th scope="col" class="price">Price (USD)</th><th scope="col" class="change">24h</th></tr>
+      </thead>
+      <tbody id="coins"></tbody>
+    </table>
+    <p class="source">Data from the <a href="https://www.coingecko.com/" rel="noopener">CoinGecko</a> public API. Prices refresh every 60 seconds.</p>
+  </main>
+  <script src="app.js"></script>
+</body>
+</html>
