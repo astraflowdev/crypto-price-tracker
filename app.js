@@ -6,10 +6,23 @@
   var MARKETS_URL = 'https://api.coingecko.com/api/v3/coins/markets' +
     '?vs_currency=usd&order=market_cap_desc&per_page=10&page=1&price_change_percentage=24h';
   var REFRESH_MS = 60000;
+  var TIMEOUT_MS = 15000;
 
   // One batched request for all coins on the list.
-  async function fetchTopCoins(fetchFn) {
-    var res = await fetchFn(MARKETS_URL);
+  // A request that hangs is stopped, so the page never stays on "Loading" with no message.
+  async function fetchTopCoins(fetchFn, timeoutMs) {
+    var ctrl = new AbortController();
+    var timedOut = false;
+    var timer = setTimeout(function () { timedOut = true; ctrl.abort(); }, timeoutMs || TIMEOUT_MS);
+    var res;
+    try {
+      res = await fetchFn(MARKETS_URL, { signal: ctrl.signal });
+    } catch (err) {
+      if (timedOut) throw new Error('CoinGecko did not answer in time');
+      throw err;
+    } finally {
+      clearTimeout(timer);
+    }
     if (!res.ok) throw new Error('CoinGecko answered with status ' + res.status);
     var data = await res.json();
     if (!Array.isArray(data)) throw new Error('Unexpected answer from CoinGecko');
@@ -62,6 +75,7 @@
         // Keep the last prices on the page and say what went wrong.
         status.textContent = 'Could not load prices (' + err.message + '). Trying again in 60 seconds.';
         status.hidden = false;
+        if (!body.rows.length) updated.textContent = 'No prices yet.';
       }
     }
 
@@ -69,9 +83,11 @@
     setInterval(refresh, REFRESH_MS);
   }
 
-  var api = { MARKETS_URL: MARKETS_URL, REFRESH_MS: REFRESH_MS, fetchTopCoins: fetchTopCoins,
+  var api = { MARKETS_URL: MARKETS_URL, REFRESH_MS: REFRESH_MS, TIMEOUT_MS: TIMEOUT_MS, fetchTopCoins: fetchTopCoins,
     formatPrice: formatPrice, formatChange: formatChange, rowsHtml: rowsHtml, start: start };
 
-  if (typeof module !== 'undefined' && module.exports) module.exports = api;
-  else root.addEventListener('DOMContentLoaded', function () { start(root.document); });
+  // In a browser, start at once (the script is at the end of the body).
+  // Do not decide this from `module`: a page or browser add-on can define it.
+  if (root.document) start(root.document);
+  else module.exports = api;
 })(typeof window !== 'undefined' ? window : globalThis);

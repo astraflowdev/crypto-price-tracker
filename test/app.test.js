@@ -62,3 +62,15 @@ test('rowsHtml gives one row per coin, escapes names and marks up/down', () => {
   assert.ok(html.includes('class="change up"'));
   assert.ok(html.includes('BTC'));
 });
+
+test('fetchTopCoins gives up with a clear error when the request hangs', async () => {
+  // A request that never answers, unless it is aborted.
+  const fetchFn = (url, opts) => new Promise((resolve, reject) => {
+    opts.signal.addEventListener('abort', () => reject(new Error('aborted')));
+  });
+  await assert.rejects(app.fetchTopCoins(fetchFn, 20), /did not answer/);
+});
+
+test('the timeout is 15 seconds by default', () => {
+  assert.strictEqual(app.TIMEOUT_MS, 15000);
+});
