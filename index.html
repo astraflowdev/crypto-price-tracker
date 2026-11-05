@@ -10,10 +10,29 @@
 </head>
 <body>
   <main>
-    <button type="button" id="theme-toggle">Dark mode</button>
+    <header class="top">
+      <button type="button" id="theme-toggle">Dark mode</button>
+      <p id="user-state" hidden>Signed in as <strong id="user-email"></strong> <button type="button" id="sign-out">Log out</button></p>
+    </header>
+    <noscript><p class="status">This page needs JavaScript to log in and load the prices.</p></noscript>
+    <section id="auth-section" aria-labelledby="auth-title" hidden>
+      <h1 id="auth-title">Log in to see crypto prices</h1>
+      <p id="auth-setup" class="status" role="alert" hidden></p>
+      <form id="auth-form" novalidate>
+        <label for="email">Email</label>
+        <input id="email" type="email" autocomplete="email" required>
+        <label for="password">Password (at least 6 characters)</label>
+        <input id="password" type="password" autocomplete="current-password" minlength="6" required>
+        <p id="auth-message" aria-live="polite" hidden></p>
+        <div class="auth-buttons">
+          <button type="submit">Log in</button>
+          <button type="button" id="sign-up">Sign up</button>
+        </div>
+      </form>
+    </section>
+    <div id="prices" hidden>
     <h1>Top 10 coins by market cap</h1>
     <p id="updated" aria-live="polite">Loading prices…</p>
-    <noscript><p class="status">This page needs JavaScript to load the prices.</p></noscript>
     <p id="status" class="status" role="alert" hidden></p>
     <table>
       <thead>
@@ -38,7 +57,12 @@
       </table>
     </section>
     <p class="source">Data from the <a href="https://www.coingecko.com/" rel="noopener">CoinGecko</a> public API. Prices refresh every 60 seconds. When CoinGecko is not available, prices come from the <a href="https://www.binance.com/" rel="noopener">Binance</a> public API. Your coins are saved in this browser.</p>
+    </div>
   </main>
+  <script src="https://www.gstatic.com/firebasejs/13.2.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/13.2.0/firebase-auth-compat.js"></script>
+  <script src="firebase-config.js"></script>
   <script src="app.js"></script>
+  <script src="auth.js"></script>
 </body>
 </html>

@@ -337,8 +337,8 @@
     loadAdded: loadAdded, saveAdded: saveAdded,
     formatPrice: formatPrice, formatChange: formatChange, rowsHtml: rowsHtml, start: start };
 
-  // In a browser, start at once (the script is at the end of the body).
+  // In a browser, auth.js starts the prices when a user signs in.
   // Do not decide this from `module`: a page or browser add-on can define it.
-  if (root.document) start(root.document, root.fetch.bind(root), root.setTimeout.bind(root));
+  if (root.document) root.startPrices = function () { start(root.document, root.fetch.bind(root), root.setTimeout.bind(root)); };
   else module.exports = api;
 })(typeof window !== 'undefined' ? window : globalThis);
