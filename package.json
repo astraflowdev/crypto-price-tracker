@@ -1,0 +1,10 @@
+{
+  "name": "crypto-price-tracker",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Static page with the top 10 crypto coins by market cap, from the CoinGecko public API.",
+  "scripts": {
+    "test": "node --test",
+    "start": "python3 -m http.server \"${PORT:-8000}\""
+  }
+}
