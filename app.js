@@ -1,5 +1,6 @@
 // Crypto price tracker: top 10 coins by market cap from the CoinGecko public API (no key),
 // plus coins that the user adds with the search box (saved in local storage).
+// When CoinGecko fails, prices come from the Binance public market data API (no key).
 // Plain script (no modules) so the page also works when opened from a file.
 (function (root) {
   'use strict';
@@ -7,7 +8,10 @@
   var API = 'https://api.coingecko.com/api/v3';
   var MARKETS_URL = API + '/coins/markets' +
     '?vs_currency=usd&order=market_cap_desc&per_page=10&page=1&price_change_percentage=24h';
+  // Binance's host for public market data only (same /api/v3 endpoints as api.binance.com).
+  var BINANCE_URL = 'https://data-api.binance.vision/api/v3/ticker/price';
   var REFRESH_MS = 60000;
+  var MAX_WAIT_MS = 600000;
   var TIMEOUT_MS = 15000;
   var STORAGE_KEY = 'addedCoins';
   // Find the top 10 again on every 10th refresh (about every 10 minutes).
@@ -26,7 +30,7 @@
   }
 
   // A request that hangs is stopped, so the page never stays on "Loading" with no message.
-  async function fetchJson(fetchFn, url, timeoutMs) {
+  async function fetchJson(fetchFn, url, name, timeoutMs) {
     var ctrl = new AbortController();
     var timedOut = false;
     var timer = setTimeout(function () { timedOut = true; ctrl.abort(); }, timeoutMs || TIMEOUT_MS);
@@ -34,27 +38,41 @@
     try {
       res = await fetchFn(url, { signal: ctrl.signal });
     } catch (err) {
-      if (timedOut) throw new Error('CoinGecko did not answer in time');
+      if (timedOut) throw new Error(name + ' did not answer in time');
       throw err;
     } finally {
       clearTimeout(timer);
     }
-    if (!res.ok) throw new Error('CoinGecko answered with status ' + res.status);
+    if (!res.ok) {
+      var httpErr = new Error(name + ' answered with status ' + res.status);
+      httpErr.status = res.status;
+      throw httpErr;
+    }
     return res.json();
   }
 
-  async function fetchMarkets(fetchFn, url, timeoutMs) {
-    var data = await fetchJson(fetchFn, url, timeoutMs);
-    if (!Array.isArray(data)) throw new Error('Unexpected answer from CoinGecko');
+  // One GET that gives a JSON list.
+  async function getList(fetchFn, url, name, timeoutMs) {
+    var data = await fetchJson(fetchFn, url, name, timeoutMs);
+    if (!Array.isArray(data)) throw new Error('Unexpected answer from ' + name);
     return data;
+  }
+
+  function fetchMarkets(fetchFn, url, timeoutMs) {
+    return getList(fetchFn, url, 'CoinGecko', timeoutMs);
   }
 
   function fetchTopCoins(fetchFn, timeoutMs) {
     return fetchMarkets(fetchFn, MARKETS_URL, timeoutMs);
   }
 
+  // Wait after `failures` errors in a row: 60 s, then double each time, up to 10 minutes.
+  function nextDelay(failures) {
+    return Math.min(REFRESH_MS * Math.pow(2, failures), MAX_WAIT_MS);
+  }
+
   async function searchCoins(fetchFn, query) {
-    var data = await fetchJson(fetchFn, searchUrl(query));
+    var data = await fetchJson(fetchFn, searchUrl(query), 'CoinGecko');
     if (!data || !Array.isArray(data.coins)) throw new Error('Unexpected answer from CoinGecko');
     return data.coins.slice(0, SEARCH_MAX).map(function (c) {
       return { id: c.id, name: c.name, symbol: c.symbol };
@@ -80,6 +98,43 @@
       return all.filter(function (c) { return c.id === id; })[0];
     }).filter(Boolean);
     return { top: top, added: added };
+  }
+
+  // New prices for the last known coins, from Binance <SYMBOL>USDT pairs (one request for all coins).
+  // A coin that Binance does not list keeps its last known price. The 24h change stays as last known.
+  async function fetchBinancePrices(fetchFn, lastCoins) {
+    var tickers = await getList(fetchFn, BINANCE_URL, 'Binance');
+    var prices = {};
+    tickers.forEach(function (t) { prices[t.symbol] = parseFloat(t.price); });
+    var found = 0;
+    var coins = lastCoins.map(function (c) {
+      var p = prices[String(c.symbol).toUpperCase() + 'USDT'];
+      if (!(p > 0)) return c;
+      found++;
+      return Object.assign({}, c, { current_price: p });
+    });
+    if (!found) throw new Error('Binance does not list these coins');
+    return coins;
+  }
+
+  // CoinGecko first. When it fails (a rate limit, or it cannot be reached), try Binance for the
+  // coins already on the page (`last` is { coins, added }). In the browser a CoinGecko 429 can look
+  // like a network error, so any CoinGecko failure starts the fallback. If Binance also fails,
+  // the CoinGecko error is thrown.
+  async function loadPrices(fetchFn, last, topIds, addedIds) {
+    try {
+      var list = await fetchList(fetchFn, topIds, addedIds || []);
+      return { source: 'coingecko', coins: list.top, added: list.added };
+    } catch (err) {
+      if (!last.coins.length) throw err;
+      try {
+        var all = await fetchBinancePrices(fetchFn, last.coins.concat(last.added));
+        var n = last.coins.length;
+        return { source: 'binance', coins: all.slice(0, n), added: all.slice(n), error: err };
+      } catch (e) {
+        throw err;
+      }
+    }
   }
 
   function loadAdded(storage) {
@@ -136,7 +191,7 @@
     }).join('');
   }
 
-  function start(doc) {
+  function start(doc, fetchFn, later) {
     var body = doc.getElementById('coins');
     var status = doc.getElementById('status');
     var updated = doc.getElementById('updated');
@@ -145,7 +200,6 @@
     var searchInput = doc.getElementById('search');
     var results = doc.getElementById('results');
     var searchStatus = doc.getElementById('search-status');
-    var fetchFn = root.fetch.bind(root);
     var storage = null;
     try { storage = root.localStorage; } catch (err) { /* Blocked storage: the list works until a reload. */ }
 
@@ -155,6 +209,7 @@
     var latest = 0;
     var lastPrices = {};
     var topShown = [];
+    var failures = 0;
 
     function renderAdded() {
       addedSection.hidden = !added.length;
@@ -162,27 +217,48 @@
       addedBody.innerHTML = rowsHtml(added.map(function (c) { return lastPrices[c.id] || c; }), true);
     }
 
-    async function refresh() {
+    // `fromTimer` is false for the refresh after a coin is added: it does not change the wait
+    // before the next timed refresh, so the message stays true.
+    async function refresh(fromTimer) {
       var mine = ++latest;
       var checkTop = refreshCount++ % TOP_CHECK_EVERY === 0;
+      var lastAdded = added.map(function (c) { return lastPrices[c.id]; }).filter(Boolean);
       try {
-        var list = await fetchList(fetchFn, checkTop ? null : topIds, added.map(function (c) { return c.id; }));
+        var r = await loadPrices(fetchFn, { coins: topShown, added: lastAdded },
+          checkTop ? null : topIds, added.map(function (c) { return c.id; }));
         if (mine !== latest) return; // A newer refresh started; let it draw the page.
-        topIds = list.top.map(function (c) { return c.id; });
-        topShown = list.top;
-        list.added.forEach(function (c) { lastPrices[c.id] = c; });
-        body.innerHTML = rowsHtml(list.top);
+        topIds = r.coins.map(function (c) { return c.id; });
+        topShown = r.coins;
+        r.added.forEach(function (c) { lastPrices[c.id] = c; });
+        body.innerHTML = rowsHtml(r.coins);
         renderAdded();
         updated.textContent = 'Last updated: ' + new Date().toLocaleTimeString();
-        status.textContent = '';
-        status.hidden = true;
+        if (r.source === 'coingecko') {
+          if (fromTimer) failures = 0;
+          status.textContent = '';
+          status.hidden = true;
+        } else {
+          if (fromTimer) failures++;
+          status.textContent = 'CoinGecko is not available (' + r.error.message + '). Prices are from Binance; ' +
+            'the 24h change and coins not on Binance may be out of date. Trying CoinGecko again in ' +
+            nextDelay(failures) / 1000 + ' seconds.';
+          status.hidden = false;
+        }
       } catch (err) {
         if (mine !== latest) return;
-        // Keep the last prices on the page and say what went wrong.
-        status.textContent = 'Could not load prices (' + err.message + '). Trying again in 60 seconds.';
+        // Keep the last prices on the page, say what went wrong, and wait longer before the next try.
+        if (fromTimer) failures++;
+        status.textContent = 'Could not load new prices (' + err.message + '). ' +
+          (body.rows.length ? 'Prices may be out of date. ' : '') +
+          'Trying again in ' + nextDelay(failures) / 1000 + ' seconds.';
         status.hidden = false;
         if (!body.rows.length) updated.textContent = 'No prices yet.';
       }
+    }
+
+    async function tick() {
+      await refresh(true);
+      later(tick, nextDelay(failures));
     }
 
     function addCoin(coin) {
@@ -198,7 +274,7 @@
       saveAdded(storage, added);
       renderAdded();
       searchStatus.textContent = coin.name + ' is added.';
-      refresh();
+      refresh(false);
     }
 
     addedBody.addEventListener('click', function (e) {
@@ -253,17 +329,16 @@
     });
 
     renderAdded();
-    refresh();
-    setInterval(refresh, REFRESH_MS);
+    return tick();
   }
 
-  var api = { MARKETS_URL: MARKETS_URL, REFRESH_MS: REFRESH_MS, TIMEOUT_MS: TIMEOUT_MS, fetchTopCoins: fetchTopCoins,
-    marketsUrl: marketsUrl, searchUrl: searchUrl, searchCoins: searchCoins, fetchList: fetchList,
+  var api = { MARKETS_URL: MARKETS_URL, BINANCE_URL: BINANCE_URL, REFRESH_MS: REFRESH_MS, TIMEOUT_MS: TIMEOUT_MS,
+    fetchTopCoins: fetchTopCoins, nextDelay: nextDelay, loadPrices: loadPrices, marketsUrl: marketsUrl, searchUrl: searchUrl, searchCoins: searchCoins, fetchList: fetchList,
     loadAdded: loadAdded, saveAdded: saveAdded,
     formatPrice: formatPrice, formatChange: formatChange, rowsHtml: rowsHtml, start: start };
 
   // In a browser, start at once (the script is at the end of the body).
   // Do not decide this from `module`: a page or browser add-on can define it.
-  if (root.document) start(root.document);
+  if (root.document) start(root.document, root.fetch.bind(root), root.setTimeout.bind(root));
   else module.exports = api;
 })(typeof window !== 'undefined' ? window : globalThis);

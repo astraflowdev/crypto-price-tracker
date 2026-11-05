@@ -168,3 +168,171 @@ test('rowsHtml with remove buttons gives one labelled button per coin', () => {
   assert.ok(html.includes('aria-label="Remove Bitcoin"'));
   assert.ok(!app.rowsHtml(sample).includes('<button'));
 });
+
+// Back-off, fallback and recovery.
+
+const binanceTickers = [
+  { symbol: 'BTCUSDT', price: '70000.50000000' },
+  { symbol: 'ETHUSDT', price: '3000.10000000' },
+];
+
+test('nextDelay is 60 seconds after success and doubles after each error, up to 10 minutes', () => {
+  assert.strictEqual(app.nextDelay(0), 60000);
+  assert.strictEqual(app.nextDelay(1), 120000);
+  assert.strictEqual(app.nextDelay(2), 240000);
+  assert.strictEqual(app.nextDelay(3), 480000);
+  assert.strictEqual(app.nextDelay(4), 600000);
+  assert.strictEqual(app.nextDelay(50), 600000);
+});
+
+test('the Binance URL is the public ticker price endpoint, with no key', () => {
+  const url = new URL(app.BINANCE_URL);
+  assert.strictEqual(url.pathname, '/api/v3/ticker/price');
+  assert.ok(!/key/i.test(app.BINANCE_URL));
+});
+
+test('fetchTopCoins error keeps the HTTP status', async () => {
+  const fetchFn = async () => ({ ok: false, status: 429, json: async () => ({}) });
+  await assert.rejects(app.fetchTopCoins(fetchFn), (err) => err.status === 429);
+});
+
+test('loadPrices uses CoinGecko when it answers, and does not call Binance', async () => {
+  const calls = [];
+  const fetchFn = async (url) => { calls.push(url); return { ok: true, json: async () => sample }; };
+  const r = await app.loadPrices(fetchFn, { coins: [], added: [] });
+  assert.strictEqual(r.source, 'coingecko');
+  assert.strictEqual(r.coins.length, 3);
+  assert.deepStrictEqual(calls, [app.MARKETS_URL]);
+});
+
+test('loadPrices takes prices from Binance when CoinGecko is rate-limited', async () => {
+  const calls = [];
+  const fetchFn = async (url) => {
+    calls.push(url);
+    if (url === app.MARKETS_URL) return { ok: false, status: 429, json: async () => ({}) };
+    return { ok: true, json: async () => binanceTickers };
+  };
+  const r = await app.loadPrices(fetchFn, { coins: sample, added: [] });
+  assert.strictEqual(r.source, 'binance');
+  assert.match(r.error.message, /429/);
+  assert.deepStrictEqual(calls, [app.MARKETS_URL, app.BINANCE_URL]);
+  // Bitcoin is listed on Binance: new price, last known 24h change.
+  assert.strictEqual(r.coins[0].current_price, 70000.5);
+  assert.strictEqual(r.coins[0].price_change_percentage_24h, -2.345);
+  // Tether and X are not listed as <SYMBOL>USDT: the last known price stays.
+  assert.strictEqual(r.coins[1].current_price, 1);
+  assert.strictEqual(r.coins[2].current_price, 0.000123);
+  // The last known list is not changed.
+  assert.strictEqual(sample[0].current_price, 76406.12);
+});
+
+test('loadPrices also tries Binance when CoinGecko cannot be reached', async () => {
+  const fetchFn = async (url) => {
+    if (url === app.MARKETS_URL) throw new TypeError('Failed to fetch');
+    return { ok: true, json: async () => binanceTickers };
+  };
+  const r = await app.loadPrices(fetchFn, { coins: sample, added: [] });
+  assert.strictEqual(r.source, 'binance');
+});
+
+test('loadPrices throws the CoinGecko error when Binance also fails', async () => {
+  const fetchFn = async (url) => {
+    if (url === app.MARKETS_URL) return { ok: false, status: 429, json: async () => ({}) };
+    throw new TypeError('Failed to fetch');
+  };
+  await assert.rejects(app.loadPrices(fetchFn, { coins: sample, added: [] }), /429/);
+});
+
+test('loadPrices throws the CoinGecko error when there are no last known coins', async () => {
+  const calls = [];
+  const fetchFn = async (url) => { calls.push(url); return { ok: false, status: 429, json: async () => ({}) }; };
+  await assert.rejects(app.loadPrices(fetchFn, { coins: [], added: [] }), /429/);
+  assert.deepStrictEqual(calls, [app.MARKETS_URL]);
+});
+
+test('loadPrices throws when Binance has none of the coins', async () => {
+  const fetchFn = async (url) => {
+    if (url === app.MARKETS_URL) return { ok: false, status: 429, json: async () => ({}) };
+    return { ok: true, json: async () => [{ symbol: 'ZZZUSDT', price: '1' }] };
+  };
+  await assert.rejects(app.loadPrices(fetchFn, { coins: sample, added: [] }), /429/);
+});
+
+// A tiny fake page, so start() can run in Node.
+function fakePage() {
+  const el = () => ({ textContent: '', hidden: true, innerHTML: '', rows: [] });
+  const input = () => Object.assign(el(), { value: '', addEventListener() {}, focus() {} });
+  const els = { coins: el(), status: el(), updated: el(), 'added-section': el(), added: input(),
+    search: input(), results: input(), 'search-status': el() };
+  Object.defineProperty(els.coins, 'rows', { get() { return (this.innerHTML.match(/<tr/g) || []); } });
+  return { els, doc: { getElementById: (id) => els[id] } };
+}
+
+test('start keeps the last prices, shows an out-of-date message, waits longer, and clears the message on recovery', async () => {
+  const { els, doc } = fakePage();
+  const waits = [];
+  let next;
+  const timer = (fn, ms) => { waits.push(ms); next = fn; };
+  let mode = 'ok';
+  const fetchFn = async (url) => {
+    if (mode === 'ok') return { ok: true, json: async () => sample };
+    throw new TypeError('Failed to fetch');
+  };
+  await app.start(doc, fetchFn, timer);
+  assert.strictEqual(els.status.hidden, true);
+  const rows = els.coins.innerHTML;
+  assert.ok(rows.includes('Bitcoin'));
+  assert.deepStrictEqual(waits, [60000]);
+
+  mode = 'down';
+  await next();
+  assert.strictEqual(els.coins.innerHTML, rows);
+  assert.strictEqual(els.status.hidden, false);
+  assert.match(els.status.textContent, /out of date/);
+  assert.match(els.status.textContent, /120 seconds/);
+  await next();
+  assert.match(els.status.textContent, /240 seconds/);
+  assert.deepStrictEqual(waits, [60000, 120000, 240000]);
+
+  mode = 'ok';
+  await next();
+  assert.strictEqual(els.status.hidden, true);
+  assert.strictEqual(els.status.textContent, '');
+  assert.deepStrictEqual(waits, [60000, 120000, 240000, 60000]);
+});
+
+test('start shows Binance prices with a message when CoinGecko is rate-limited', async () => {
+  const { els, doc } = fakePage();
+  const waits = [];
+  let next;
+  const timer = (fn, ms) => { waits.push(ms); next = fn; };
+  let limited = false;
+  const fetchFn = async (url) => {
+    if (url.includes('coingecko')) {
+      return limited ? { ok: false, status: 429, json: async () => ({}) } : { ok: true, json: async () => sample };
+    }
+    return { ok: true, json: async () => binanceTickers };
+  };
+  await app.start(doc, fetchFn, timer);
+  limited = true;
+  await next();
+  assert.ok(els.coins.innerHTML.includes('$70,000.50'));
+  assert.strictEqual(els.status.hidden, false);
+  assert.match(els.status.textContent, /Binance/);
+  assert.deepStrictEqual(waits, [60000, 120000]);
+});
+
+test('loadPrices gives Binance prices for the added coins too, in the same Binance request', async () => {
+  const calls = [];
+  const fetchFn = async (url) => {
+    calls.push(url);
+    if (url.includes('coingecko')) return { ok: false, status: 429, json: async () => ({}) };
+    return { ok: true, json: async () => binanceTickers.concat([{ symbol: 'DOGEUSDT', price: '0.08' }]) };
+  };
+  const doge = { id: 'dogecoin', symbol: 'doge', name: 'Dogecoin', current_price: 0.07, price_change_percentage_24h: -5 };
+  const r = await app.loadPrices(fetchFn, { coins: sample, added: [doge] }, ['bitcoin'], ['dogecoin']);
+  assert.strictEqual(r.source, 'binance');
+  assert.strictEqual(r.coins.length, sample.length);
+  assert.deepStrictEqual(r.added.map((c) => c.current_price), [0.08]);
+  assert.strictEqual(calls.filter((u) => u === app.BINANCE_URL).length, 1);
+});
