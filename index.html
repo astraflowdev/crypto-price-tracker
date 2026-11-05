@@ -18,7 +18,23 @@
       </thead>
       <tbody id="coins"></tbody>
     </table>
-    <p class="source">Data from the <a href="https://www.coingecko.com/" rel="noopener">CoinGecko</a> public API. Prices refresh every 60 seconds.</p>
+    <section aria-labelledby="add-title">
+      <h2 id="add-title">Add a coin</h2>
+      <label for="search">Search by name or symbol</label>
+      <input id="search" type="search" autocomplete="off" placeholder="For example: dogecoin or DOGE">
+      <p id="search-status" aria-live="polite"></p>
+      <ul id="results"></ul>
+    </section>
+    <section id="added-section" aria-labelledby="added-title" hidden>
+      <h2 id="added-title">Your coins</h2>
+      <table>
+        <thead>
+          <tr><th scope="col">#</th><th scope="col">Coin</th><th scope="col" class="price">Price (USD)</th><th scope="col" class="change">24h</th><th scope="col"><span class="visually-hidden">Remove</span></th></tr>
+        </thead>
+        <tbody id="added"></tbody>
+      </table>
+    </section>
+    <p class="source">Data from the <a href="https://www.coingecko.com/" rel="noopener">CoinGecko</a> public API. Prices refresh every 60 seconds. Your coins are saved in this browser.</p>
   </main>
   <script src="app.js"></script>
 </body>
