@@ -23,9 +23,9 @@
         <input id="email" type="email" autocomplete="email" required>
         <label for="password">Password (at least 6 characters)</label>
         <input id="password" type="password" autocomplete="current-password" minlength="6" required>
-        <p id="auth-message" aria-live="polite" hidden></p>
+        <p id="auth-message" role="status"></p>
         <div class="auth-buttons">
-          <button type="submit">Log in</button>
+          <button type="submit" id="log-in">Log in</button>
           <button type="button" id="sign-up">Sign up</button>
         </div>
       </form>

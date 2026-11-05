@@ -24,7 +24,7 @@ function fakePage() {
       addEventListener(type, fn) { handlers[type] = fn; }, focus() {} };
   };
   const els = { 'auth-section': el(), 'auth-form': el(), 'auth-setup': el(), 'auth-message': el(),
-    email: el(), password: el(), 'sign-up': el(), prices: el(), 'user-state': el(), 'user-email': el(),
+    email: el(), password: el(), 'log-in': el(), 'sign-up': el(), prices: el(), 'user-state': el(), 'user-email': el(),
     'sign-out': el() };
   return { els, doc: { getElementById: (id) => els[id] } };
 }
@@ -104,8 +104,8 @@ test('a failed log in shows a message and keeps the prices hidden', async () => 
   els.password.value = 'wrong';
   await els['auth-form'].handlers.submit(submit);
   assert.match(els['auth-message'].textContent, /not correct/);
-  assert.strictEqual(els['auth-message'].hidden, false);
   assert.strictEqual(els.prices.hidden, true);
+  assert.strictEqual(els['log-in'].disabled, false);
   assert.strictEqual(els['sign-up'].disabled, false);
 });
 

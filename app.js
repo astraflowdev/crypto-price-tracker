@@ -1,7 +1,7 @@
 // Crypto price tracker: top 10 coins by market cap from the CoinGecko public API (no key),
 // plus coins that the user adds with the search box (saved in local storage).
 // When CoinGecko fails, prices come from the Binance public market data API (no key).
-// Plain script (no modules) so the page also works when opened from a file.
+// Plain script (no modules and no build step).
 (function (root) {
   'use strict';
 

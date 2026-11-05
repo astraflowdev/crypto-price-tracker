@@ -43,6 +43,7 @@
     var message = doc.getElementById('auth-message');
     var email = doc.getElementById('email');
     var password = doc.getElementById('password');
+    var logIn = doc.getElementById('log-in');
     var signUp = doc.getElementById('sign-up');
     var prices = doc.getElementById('prices');
     var userState = doc.getElementById('user-state');
@@ -52,7 +53,6 @@
 
     function say(text) {
       message.textContent = text;
-      message.hidden = !text;
     }
 
     auth.onAuthStateChanged(function (user) {
@@ -74,7 +74,7 @@
       var p = password.value;
       if (!e || !p) { say('Enter an email and a password.'); return; }
       say(create ? 'Making your account…' : 'Logging in…');
-      signUp.disabled = true;
+      logIn.disabled = signUp.disabled = true;
       try {
         if (create) await auth.createUserWithEmailAndPassword(e, p);
         else await auth.signInWithEmailAndPassword(e, p);
@@ -82,7 +82,7 @@
         say(errorMessage(err));
         password.focus();
       } finally {
-        signUp.disabled = false;
+        logIn.disabled = signUp.disabled = false;
       }
     }
 
