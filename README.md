@@ -1,6 +1,6 @@
 # Crypto Price Tracker
 
-A static web page (HTML and JavaScript, no backend, no build step) that shows the top 10 coins by market cap, with the USD price and the 24h change. Data comes from the free CoinGecko public API, with no key.
+A static web page (HTML and JavaScript, no backend, no build step) that shows the top 10 coins by market cap, with the USD price and the 24h change. A search box finds other coins to add to the list; they are saved in the browser (local storage) and can be removed. Each refresh gets all coins in one batched request (two when the page finds the top 10 again, about every 10 minutes). Data comes from the free CoinGecko public API, with no key.
 
 When CoinGecko fails (a rate limit or a network error), the page keeps the last prices and shows a short message that they may be out of date. It waits longer before each new try (60 s, then 120 s, 240 s, up to 10 minutes). It also gets new prices for the coins on the page from the Binance public API (`/api/v3/ticker/price`, no key) where Binance lists the coin against USDT. The message goes away when CoinGecko prices load again.
 

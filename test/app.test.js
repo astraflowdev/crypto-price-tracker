@@ -75,6 +75,100 @@ test('the timeout is 15 seconds by default', () => {
   assert.strictEqual(app.TIMEOUT_MS, 15000);
 });
 
+// --- Added coins (search, add, remove, save) ---
+
+function fakeFetch(answers) {
+  const calls = [];
+  const fn = async (url) => {
+    calls.push(url);
+    const u = new URL(url);
+    const ids = u.searchParams.get('ids');
+    const data = ids ? answers.filter((c) => ids.split(',').includes(c.id)) : answers.slice(0, 10);
+    return { ok: true, json: async () => data };
+  };
+  fn.calls = calls;
+  return fn;
+}
+
+const market = Array.from({ length: 12 }, (_, i) => ({
+  id: 'c' + i, symbol: 's' + i, name: 'Coin ' + i, current_price: 100 - i, price_change_percentage_24h: i,
+}));
+
+test('searchUrl uses the CoinGecko search endpoint and encodes the text', () => {
+  const url = new URL(app.searchUrl('shiba inu&x'));
+  assert.strictEqual(url.origin + url.pathname, 'https://api.coingecko.com/api/v3/search');
+  assert.strictEqual(url.searchParams.get('query'), 'shiba inu&x');
+});
+
+test('searchCoins gives the matching coins from the search answer', async () => {
+  const fetchFn = async () => ({ ok: true, json: async () => ({ coins: [{ id: 'dogecoin', name: 'Dogecoin', symbol: 'DOGE' }] }) });
+  const coins = await app.searchCoins(fetchFn, 'doge');
+  assert.deepStrictEqual(coins, [{ id: 'dogecoin', name: 'Dogecoin', symbol: 'DOGE' }]);
+});
+
+test('searchCoins throws when the answer has no coin list', async () => {
+  const fetchFn = async () => ({ ok: true, json: async () => ({}) });
+  await assert.rejects(app.searchCoins(fetchFn, 'doge'), /Unexpected/);
+});
+
+test('marketsUrl asks for the given ids in one request', () => {
+  const url = new URL(app.marketsUrl(['bitcoin', 'dogecoin']));
+  assert.strictEqual(url.pathname, '/api/v3/coins/markets');
+  assert.strictEqual(url.searchParams.get('ids'), 'bitcoin,dogecoin');
+  assert.strictEqual(url.searchParams.get('vs_currency'), 'usd');
+});
+
+test('fetchList with no added coins makes one top-10 request', async () => {
+  const fetchFn = fakeFetch(market);
+  const list = await app.fetchList(fetchFn, null, []);
+  assert.strictEqual(fetchFn.calls.length, 1);
+  assert.strictEqual(fetchFn.calls[0], app.MARKETS_URL);
+  assert.strictEqual(list.top.length, 10);
+  assert.deepStrictEqual(list.added, []);
+});
+
+test('fetchList puts the top 10 and all added coins in one request when the top 10 is known', async () => {
+  const fetchFn = fakeFetch(market);
+  const topIds = market.slice(0, 10).map((c) => c.id);
+  const list = await app.fetchList(fetchFn, topIds, ['c11', 'c10']);
+  assert.strictEqual(fetchFn.calls.length, 1);
+  assert.strictEqual(new URL(fetchFn.calls[0]).searchParams.get('ids').split(',').length, 12);
+  assert.deepStrictEqual(list.top.map((c) => c.id), topIds);
+  assert.deepStrictEqual(list.added.map((c) => c.id), ['c11', 'c10']);
+});
+
+test('fetchList makes at most two requests when it must find the top 10, for any number of added coins', async () => {
+  const fetchFn = fakeFetch(market);
+  const list = await app.fetchList(fetchFn, null, ['c10', 'c11', 'c3']);
+  assert.strictEqual(fetchFn.calls.length, 2);
+  assert.deepStrictEqual(list.added.map((c) => c.id), ['c10', 'c11', 'c3']);
+});
+
+test('loadAdded reads saved coins and ignores bad data', () => {
+  const store = (v) => ({ getItem: () => v });
+  assert.deepStrictEqual(app.loadAdded(store(JSON.stringify([{ id: 'a', name: 'A', symbol: 'a' }]))), [{ id: 'a', name: 'A', symbol: 'a' }]);
+  assert.deepStrictEqual(app.loadAdded(store('not json')), []);
+  assert.deepStrictEqual(app.loadAdded(store(JSON.stringify({ id: 'a' }))), []);
+  assert.deepStrictEqual(app.loadAdded(store(JSON.stringify([{ name: 'no id' }, 5]))), []);
+  assert.deepStrictEqual(app.loadAdded(store(null)), []);
+  assert.deepStrictEqual(app.loadAdded({ getItem: () => { throw new Error('blocked'); } }), []);
+});
+
+test('saveAdded writes the coins, and loadAdded reads them back', () => {
+  const data = {};
+  const storage = { getItem: (k) => (k in data ? data[k] : null), setItem: (k, v) => { data[k] = v; } };
+  app.saveAdded(storage, [{ id: 'dogecoin', name: 'Dogecoin', symbol: 'DOGE' }]);
+  assert.deepStrictEqual(app.loadAdded(storage), [{ id: 'dogecoin', name: 'Dogecoin', symbol: 'DOGE' }]);
+});
+
+test('rowsHtml with remove buttons gives one labelled button per coin', () => {
+  const html = app.rowsHtml(sample, true);
+  assert.strictEqual((html.match(/<button/g) || []).length, 3);
+  assert.ok(html.includes('data-remove="bitcoin"'));
+  assert.ok(html.includes('aria-label="Remove Bitcoin"'));
+  assert.ok(!app.rowsHtml(sample).includes('<button'));
+});
+
 // Back-off, fallback and recovery.
 
 const binanceTickers = [
@@ -105,7 +199,7 @@ test('fetchTopCoins error keeps the HTTP status', async () => {
 test('loadPrices uses CoinGecko when it answers, and does not call Binance', async () => {
   const calls = [];
   const fetchFn = async (url) => { calls.push(url); return { ok: true, json: async () => sample }; };
-  const r = await app.loadPrices(fetchFn, []);
+  const r = await app.loadPrices(fetchFn, { coins: [], added: [] });
   assert.strictEqual(r.source, 'coingecko');
   assert.strictEqual(r.coins.length, 3);
   assert.deepStrictEqual(calls, [app.MARKETS_URL]);
@@ -118,7 +212,7 @@ test('loadPrices takes prices from Binance when CoinGecko is rate-limited', asyn
     if (url === app.MARKETS_URL) return { ok: false, status: 429, json: async () => ({}) };
     return { ok: true, json: async () => binanceTickers };
   };
-  const r = await app.loadPrices(fetchFn, sample);
+  const r = await app.loadPrices(fetchFn, { coins: sample, added: [] });
   assert.strictEqual(r.source, 'binance');
   assert.match(r.error.message, /429/);
   assert.deepStrictEqual(calls, [app.MARKETS_URL, app.BINANCE_URL]);
@@ -137,7 +231,7 @@ test('loadPrices also tries Binance when CoinGecko cannot be reached', async () 
     if (url === app.MARKETS_URL) throw new TypeError('Failed to fetch');
     return { ok: true, json: async () => binanceTickers };
   };
-  const r = await app.loadPrices(fetchFn, sample);
+  const r = await app.loadPrices(fetchFn, { coins: sample, added: [] });
   assert.strictEqual(r.source, 'binance');
 });
 
@@ -146,13 +240,13 @@ test('loadPrices throws the CoinGecko error when Binance also fails', async () =
     if (url === app.MARKETS_URL) return { ok: false, status: 429, json: async () => ({}) };
     throw new TypeError('Failed to fetch');
   };
-  await assert.rejects(app.loadPrices(fetchFn, sample), /429/);
+  await assert.rejects(app.loadPrices(fetchFn, { coins: sample, added: [] }), /429/);
 });
 
 test('loadPrices throws the CoinGecko error when there are no last known coins', async () => {
   const calls = [];
   const fetchFn = async (url) => { calls.push(url); return { ok: false, status: 429, json: async () => ({}) }; };
-  await assert.rejects(app.loadPrices(fetchFn, []), /429/);
+  await assert.rejects(app.loadPrices(fetchFn, { coins: [], added: [] }), /429/);
   assert.deepStrictEqual(calls, [app.MARKETS_URL]);
 });
 
@@ -161,13 +255,15 @@ test('loadPrices throws when Binance has none of the coins', async () => {
     if (url === app.MARKETS_URL) return { ok: false, status: 429, json: async () => ({}) };
     return { ok: true, json: async () => [{ symbol: 'ZZZUSDT', price: '1' }] };
   };
-  await assert.rejects(app.loadPrices(fetchFn, sample), /429/);
+  await assert.rejects(app.loadPrices(fetchFn, { coins: sample, added: [] }), /429/);
 });
 
 // A tiny fake page, so start() can run in Node.
 function fakePage() {
   const el = () => ({ textContent: '', hidden: true, innerHTML: '', rows: [] });
-  const els = { coins: el(), status: el(), updated: el() };
+  const input = () => Object.assign(el(), { value: '', addEventListener() {}, focus() {} });
+  const els = { coins: el(), status: el(), updated: el(), 'added-section': el(), added: input(),
+    search: input(), results: input(), 'search-status': el() };
   Object.defineProperty(els.coins, 'rows', { get() { return (this.innerHTML.match(/<tr/g) || []); } });
   return { els, doc: { getElementById: (id) => els[id] } };
 }
@@ -212,7 +308,7 @@ test('start shows Binance prices with a message when CoinGecko is rate-limited',
   const timer = (fn, ms) => { waits.push(ms); next = fn; };
   let limited = false;
   const fetchFn = async (url) => {
-    if (url === app.MARKETS_URL) {
+    if (url.includes('coingecko')) {
       return limited ? { ok: false, status: 429, json: async () => ({}) } : { ok: true, json: async () => sample };
     }
     return { ok: true, json: async () => binanceTickers };
@@ -224,4 +320,19 @@ test('start shows Binance prices with a message when CoinGecko is rate-limited',
   assert.strictEqual(els.status.hidden, false);
   assert.match(els.status.textContent, /Binance/);
   assert.deepStrictEqual(waits, [60000, 120000]);
+});
+
+test('loadPrices gives Binance prices for the added coins too, in the same Binance request', async () => {
+  const calls = [];
+  const fetchFn = async (url) => {
+    calls.push(url);
+    if (url.includes('coingecko')) return { ok: false, status: 429, json: async () => ({}) };
+    return { ok: true, json: async () => binanceTickers.concat([{ symbol: 'DOGEUSDT', price: '0.08' }]) };
+  };
+  const doge = { id: 'dogecoin', symbol: 'doge', name: 'Dogecoin', current_price: 0.07, price_change_percentage_24h: -5 };
+  const r = await app.loadPrices(fetchFn, { coins: sample, added: [doge] }, ['bitcoin'], ['dogecoin']);
+  assert.strictEqual(r.source, 'binance');
+  assert.strictEqual(r.coins.length, sample.length);
+  assert.deepStrictEqual(r.added.map((c) => c.current_price), [0.08]);
+  assert.strictEqual(calls.filter((u) => u === app.BINANCE_URL).length, 1);
 });
