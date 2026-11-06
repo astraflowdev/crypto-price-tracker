@@ -19,7 +19,7 @@ body, table, th, td, input, button, .status, a {
 body { margin: 0; font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; background: var(--bg); color: var(--text); }
 main { max-width: 640px; margin: 0 auto; padding: 1rem; }
 h1 { font-size: 1.4rem; margin: 0.5rem 0; }
-#theme-toggle { float: right; font: inherit; font-size: 0.85rem; padding: 0.35rem 0.75rem; border-radius: 6px; border: 1px solid var(--border); background: var(--surface); color: var(--text); cursor: pointer; }
+#theme-toggle { font: inherit; font-size: 0.85rem; padding: 0.35rem 0.75rem; border-radius: 6px; border: 1px solid var(--border); background: var(--surface); color: var(--text); cursor: pointer; }
 input { background: var(--surface); color: var(--text); border: 1px solid var(--border); }
 #updated { color: var(--muted); margin: 0 0 0.75rem; font-size: 0.9rem; }
 .status { background: var(--alert-bg); color: var(--alert-text); border: 1px solid var(--alert-border); padding: 0.5rem 0.75rem; border-radius: 6px; }
@@ -43,3 +43,9 @@ button { font: inherit; font-size: 0.9rem; padding: 0.3rem 0.6rem; border: 1px s
 button:hover, button:focus-visible { background: #e8f0fb; }
 .remove { text-align: right; width: 1%; }
 .visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+header.top { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 0.5rem; flex-direction: row-reverse; }
+#user-state { margin: 0; font-size: 0.9rem; color: var(--muted); }
+#user-state strong { color: var(--text); font-weight: 600; word-break: break-all; }
+#auth-form input { width: 100%; box-sizing: border-box; padding: 0.5rem 0.75rem; font-size: 1rem; border-radius: 6px; margin-bottom: 0.75rem; }
+#auth-message { font-size: 0.9rem; margin: 0 0 0.75rem; }
+.auth-buttons { display: flex; gap: 0.5rem; }
